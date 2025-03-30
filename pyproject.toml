@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chromadesk"
-version = "0.2.4" # Updated version
+version = "0.2.6" # Updated version
 authors = [
   { name="Anant Patel", email="anantpatel2000@pm.me" }, 
 ]
@@ -27,6 +27,12 @@ dependencies = [
     # PySide6 is needed, specify version if necessary
     # Ensure range matches what worked during install, e.g., "PySide6>=6.5,<6.8"
     "PySide6", 
+]
+
+[project.optional-dependencies]
+notifications = [
+    "notify2",
+    "dbus-python",
 ]
 
 # Define where setuptools can find the package code

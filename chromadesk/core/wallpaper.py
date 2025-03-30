@@ -3,8 +3,6 @@ import subprocess
 import logging
 from pathlib import Path
 import shutil
-import notify2
-import dbus
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +15,9 @@ KEY_PICTURE_OPTIONS = "picture-options" # Controls how image is scaled (e.g., 'z
 def _send_notification_notify2(title: str, message: str, icon_path: str | None = None):
     """Sends a notification using the notify2 library."""
     try:
+        import notify2 # Import inside function
+        import dbus # Import for exception handling
+
         notify2.init("ChromaDesk")
         icon = icon_path if icon_path and Path(icon_path).exists() else "dialog-information" # Fallback icon
         notification = notify2.Notification(title, message, icon)
@@ -39,6 +40,8 @@ def _send_notification_notify2(title: str, message: str, icon_path: str | None =
 def _send_notification_dbus(title: str, message: str, icon_name: str = "dialog-information"):
     """Sends a notification using raw dbus-python (fallback)."""
     try:
+        import dbus # Import inside function
+
         bus = dbus.SessionBus()
         notify_proxy = bus.get_object('org.freedesktop.Notifications', '/org/freedesktop/Notifications')
         notify_interface = dbus.Interface(notify_proxy, 'org.freedesktop.Notifications')
@@ -57,6 +60,9 @@ def _send_notification_dbus(title: str, message: str, icon_name: str = "dialog-i
         )
         logger.info(f"Notification sent via dbus-python: '{title}'")
         return True
+    except ImportError:
+        logger.warning("dbus-python library not found. Cannot send notification via dbus.")
+        return False
     except dbus.exceptions.DBusException as e:
         logger.warning(f"DBusException while sending notification via dbus-python: {e}")
         logger.warning("Ensure DBus session bus is running and accessible.")

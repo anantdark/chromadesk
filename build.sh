@@ -129,6 +129,20 @@ pip install --upgrade build wheel
 pip install --upgrade pyinstaller
 pip install -e .
 
+# --- Install Dependencies --- 
+
+echo "Installing build dependencies and project into venv..."
+.venv/bin/pip install -U pip setuptools wheel build
+echo "Installing project core dependencies..."
+.venv/bin/pip install .
+echo "Installing optional dependencies for AppImage [notifications]..."
+.venv/bin/pip install ".[notifications]"
+
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Error: Failed to install dependencies.${NC}"
+    exit 1
+fi
+
 # Get version information
 VERSION=$(python -c "import chromadesk; print(chromadesk.__version__)")
 echo -e "${GREEN}Building version: ${YELLOW}$VERSION${NC}"
