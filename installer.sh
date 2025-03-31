@@ -1,382 +1,457 @@
 #!/bin/bash
-# Installer script for ChromaDesk
+# Installer/Uninstaller script for ChromaDesk
 
-# set -e # Exit on first error (Temporarily disabled for debugging)
+# Exit on first error, unset variables, and pipe failures
+set -euo pipefail
 
 # --- Configuration ---
-APP_NAME="ChromaDesk"
-GITHUB_REPO="anantdark/chromadesk"
-BIN_NAME="io.github.anantdark.chromadesk" # Executable name after installation
-ICON_NAME="io.github.anantdark.chromadesk.png"
-DESKTOP_FILE_NAME="io.github.anantdark.chromadesk.desktop"
-ICON_SOURCE_PATH="data/icons/io.github.anantdark.chromadesk.png"
+readonly APP_NAME="ChromaDesk"
+readonly GITHUB_REPO="anantdark/chromadesk"
+readonly BIN_NAME="io.github.anantdark.chromadesk" # Target executable name
+readonly BASE_EXECUTABLE_NAME="chromadesk" # Base name for icons/desktop references
+readonly ICON_NAME="${BIN_NAME}.png"
+readonly DESKTOP_FILE_NAME="${BIN_NAME}.desktop"
+readonly SOURCE_ICON_PATH="data/icons/${ICON_NAME}" # Assumes icon filename matches BIN_NAME.png
 
-# Standard user install locations
-INSTALL_DIR_BIN="$HOME/.local/bin"
-INSTALL_DIR_DESKTOP="$HOME/.local/share/applications"
-INSTALL_DIR_ICONS_BASE="$HOME/.local/share/icons"
-INSTALL_DIR_ICONS="$INSTALL_DIR_ICONS_BASE/hicolor/128x128/apps" # Standard size
+# Standard user install locations (~/.local/...)
+readonly INSTALL_DIR_BIN="$HOME/.local/bin"
+readonly INSTALL_DIR_DESKTOP="$HOME/.local/share/applications"
+readonly INSTALL_DIR_ICONS_BASE="$HOME/.local/share/icons"
+readonly INSTALL_DIR_PIXMAPS="$HOME/.local/share/pixmaps"
+# Standard hicolor path
+readonly INSTALL_DIR_ICONS="$INSTALL_DIR_ICONS_BASE/hicolor/128x128/apps"
 
-FINAL_BIN_PATH="$INSTALL_DIR_BIN/$BIN_NAME"
-FINAL_DESKTOP_PATH="$INSTALL_DIR_DESKTOP/$DESKTOP_FILE_NAME"
-FINAL_ICON_PATH="$INSTALL_DIR_ICONS/$ICON_NAME"
+# Final paths after installation
+readonly FINAL_BIN_PATH="$INSTALL_DIR_BIN/$BIN_NAME"
+readonly FINAL_DESKTOP_PATH="$INSTALL_DIR_DESKTOP/$DESKTOP_FILE_NAME"
+readonly FINAL_ICON_PATH="$INSTALL_DIR_ICONS/$ICON_NAME"
+readonly FINAL_SIMPLE_ICON_HICOLOR="$INSTALL_DIR_ICONS/${BASE_EXECUTABLE_NAME}.png"
+readonly FINAL_PIXMAP_PATH="$INSTALL_DIR_PIXMAPS/$ICON_NAME"
+readonly FINAL_SIMPLE_PIXMAP="$INSTALL_DIR_PIXMAPS/${BASE_EXECUTABLE_NAME}.png"
 
-# Colors
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m' # No Color
+# Colors for output
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly RED='\033[0;31m'
+readonly NC='\033[0m' # No Color
 
 # --- Helper Functions ---
-echo_green() {
-    echo -e "${GREEN}$1${NC}"
-}
-echo_yellow() {
-    echo -e "${YELLOW}$1${NC}"
-}
-echo_red() {
-    echo -e "${RED}$1${NC}"
-}
+# Log messages - REDIRECTED TO STDERR
+log_info() { echo -e "${GREEN}[INFO]${NC} $1" >&2; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1" >&2; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
-# --- Dependency Check ---
+# Check for required command-line tools
 check_deps() {
-    echo "Checking dependencies..."
+    log_info "Checking dependencies..."
     local missing_deps=0
-    if ! command -v curl &> /dev/null; then
-        echo_red "Error: 'curl' command not found. Please install curl."
-        missing_deps=1
+    local cmd
+    for cmd in curl find grep sed mkdir mv chmod cp basename; do
+        if ! command -v "$cmd" &>/dev/null; then
+            log_error "Required command '$cmd' not found. Please install it."
+            missing_deps=1
+        fi
+    done
+
+    # Optional dependencies
+    if ! command -v jq &>/dev/null; then
+        log_warn "'jq' command not found. Using less robust fallback for GitHub API parsing."
     fi
-    # jq is preferred but optional (fallback exists)
-    if ! command -v jq &> /dev/null; then
-        echo_yellow "Warning: 'jq' command not found. Using less robust fallback for GitHub API parsing."
+    if ! command -v update-desktop-database &>/dev/null; then
+        log_warn "'update-desktop-database' not found. Application menu might not update automatically."
     fi
-    # Add checks for other essential tools if needed (find, grep, sed, mkdir, mv, chmod, cp)
+    if ! command -v gtk-update-icon-cache &>/dev/null; then
+        log_warn "'gtk-update-icon-cache' not found. Icons might not update automatically."
+    fi
 
     if [[ $missing_deps -ne 0 ]]; then
         exit 1
     fi
+    log_info "Basic dependencies check passed."
 }
 
-# --- Download Logic ---
+# Download the latest AppImage release from GitHub
+# Returns 0 and echoes filename on success (stdout), returns 1 on failure
 download_latest_appimage() {
-    echo_yellow "Attempting to download latest release from GitHub ($GITHUB_REPO)..."
+    log_info "Attempting to download latest release from GitHub ($GITHUB_REPO)..."
     local api_url="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
-    local release_json
-    local download_url
-    local filename
+    local release_json download_url filename appimage_pattern
 
-    # Fetch release data
-    echo "Fetching latest release info from $api_url ..."
-    release_json=$(curl -sL "$api_url")
-    if [[ $? -ne 0 ]]; then
-        echo_red "Error: Failed to fetch release data from GitHub API."
-        return 1 # Indicate failure
-    fi
+    # Pattern to match AppImage (adjust if naming changes significantly)
+    # Allow for different OS tags in filename generated by CI
+    appimage_pattern="${BASE_EXECUTABLE_NAME}-.*-x86_64.*\.AppImage$"
 
-    # Parse JSON to find AppImage URL and filename
-    if command -v jq &> /dev/null; then
-        download_url=$(echo "$release_json" | jq -r '.assets[] | select(.name | test("chromadesk-.*\\.AppImage$")) | .browser_download_url')
-        filename=$(echo "$release_json" | jq -r '.assets[] | select(.name | test("chromadesk-.*\\.AppImage$")) | .name')
+    log_info "Fetching latest release info from $api_url ..."
+    # Handle curl errors explicitly
+    release_json=$(curl --silent --location --fail "$api_url") || {
+        log_error "Failed to fetch release data from GitHub API (curl error $?)."
+        return 1
+    }
+
+    # Use jq if available, otherwise fallback to grep
+    if command -v jq &>/dev/null; then
+        log_info "Using jq to parse GitHub API response."
+        # Find asset matching the pattern, prefer ubuntu2404, then 2204, then 2004, then any
+        # This requires more complex jq logic or multiple attempts - keep simple for now: find *any* match
+        download_url=$(echo "$release_json" | jq -r --arg pattern "$appimage_pattern" '.assets[] | select(.name | test($pattern)) | .browser_download_url' | head -n 1)
+        filename=$(echo "$release_json" | jq -r --arg pattern "$appimage_pattern" '.assets[] | select(.name | test($pattern)) | .name' | head -n 1)
     else
-        # Fallback using grep (less reliable, assumes URL structure)
-        download_url=$(echo "$release_json" | grep -o 'https://github.com/[^" ]*/releases/download/[^" ]*chromadesk-[^" ]*\.AppImage' | head -n 1)
+        log_warn "Using grep fallback for parsing GitHub API response."
+        # Grep is less precise, might grab wrong URL if assets change format
+        download_url=$(echo "$release_json" | grep -o 'https://github.com/[^"]*' | grep -E "$appimage_pattern" | head -n 1)
         if [[ -n "$download_url" ]]; then
             filename=$(basename "$download_url")
+        else
+             filename="" # Ensure filename is empty if grep fails
         fi
     fi
 
+    # Validate results
     if [[ -z "$download_url" || "$download_url" == "null" || -z "$filename" ]]; then
-        echo_red "Error: Could not find AppImage download URL or filename in the latest GitHub release."
-        echo "API Response Snippet: $(echo "$release_json" | head -n 10)"
-        return 1 # Indicate failure
+        log_error "Could not find AppImage download URL/filename matching pattern '$appimage_pattern' in the latest release."
+        log_warn "API Response Snippet: $(echo "$release_json" | head -n 10)"
+        return 1
     fi
 
-    echo "Found AppImage: $filename"
-    echo "Download URL: $download_url"
+    log_info "Found AppImage: $filename"
+    log_info "Download URL: $download_url"
 
-    # Download the AppImage
-    echo "Downloading $filename ..."
-    curl -L -o "$filename" "$download_url"
-    if [[ $? -ne 0 ]]; then
-        echo_red "Error: Download failed."
+    # Download the file
+    log_info "Downloading $filename ..."
+    if curl --progress-bar --location --fail -o "$filename" "$download_url"; then
+        chmod +x "$filename"
+        log_info "${GREEN}Download complete: $filename${NC}"
+        echo "$filename" # Return the filename via stdout
+        return 0
+    else
+        log_error "Download failed (curl error $?)."
         rm -f "$filename" # Clean up partial download
-        return 1 # Indicate failure
+        return 1
     fi
-
-    chmod +x "$filename"
-    echo_green "Download complete: $filename"
-    echo "$filename" # Return the filename on success
-    return 0
 }
 
-# --- Installation Logic ---
-install_app() {
-    echo_green "Starting ChromaDesk Installation..."
 
-    # 1. Find or Build AppImage
-    APPIMAGE_FILE=$(find . -maxdepth 1 -name 'chromadesk-*.AppImage' -print -quit)
+# Find an existing AppImage, build it, or download it
+# Returns 0 and echoes the final AppImage path (stdout) on success, returns 1 on failure
+find_or_create_appimage() {
+    # Log messages go to stderr because log_info redirects now
+    log_info "Looking for existing/building/downloading AppImage..."
+    local appimage_file build_script="./build.sh" downloaded_filename
 
-    if [[ -z "$APPIMAGE_FILE" ]]; then
-        echo_yellow "No existing ChromaDesk AppImage found. Building..."
-        if [[ ! -f "build.sh" ]]; then
-            echo_red "Error: build.sh not found in the current directory. Cannot build."
-            exit 1
-        fi
-        echo "Running ./build.sh --appimage ..."
-        if ./build.sh --appimage; then
-            APPIMAGE_FILE=$(find . -maxdepth 1 -name 'chromadesk-*.AppImage' -print -quit)
-            if [[ -z "$APPIMAGE_FILE" ]]; then
-                echo_red "Error: Build script ran but could not find the built AppImage."
-                exit 1 # Exit if build claims success but file not found
-            fi
-            echo_green "Build successful."
-        else
-            echo_yellow "Local build failed. Attempting to download latest release from GitHub..."
-            local downloaded_filename
-            downloaded_filename=$(download_latest_appimage)
-            if [[ $? -eq 0 && -n "$downloaded_filename" ]]; then
-                echo_green "Successfully downloaded latest release: $downloaded_filename"
-                APPIMAGE_FILE="$downloaded_filename" # Use the downloaded file
-            else
-                echo_red "Error: Local build failed and download from GitHub also failed."
-                exit 1
-            fi
-        fi
-    else
-        echo_green "Found existing AppImage: $APPIMAGE_FILE"
+    # 1. Look for existing AppImage in current directory
+    # Match any OS tag or no tag
+    appimage_file=$(find . -maxdepth 1 -name "${BASE_EXECUTABLE_NAME}-*-x86_64*.AppImage" -print -quit)
+    if [[ -n "$appimage_file" ]]; then
+        log_info "Found existing AppImage: $appimage_file"
+        echo "$appimage_file" # Echo filename to stdout
+        return 0
     fi
 
-    # 2. Create Directories
-    echo "Ensuring installation directories exist..."
-    mkdir -p "$INSTALL_DIR_BIN"
-    mkdir -p "$INSTALL_DIR_DESKTOP"
-    mkdir -p "$INSTALL_DIR_ICONS"
+    # 2. Try building if build script exists
+    if [[ -f "$build_script" ]]; then
+        log_info "No existing AppImage found. Trying to build locally..."
+        # Ensure build script is executable
+        chmod +x "$build_script"
+        # *** Run build script, redirect its STDOUT to STDERR ***
+        # This prevents build logs from being captured by command substitution later
+        if "$build_script" --appimage >&2; then
+        # *** End redirection change ***
+            # Build succeeded (returned exit code 0), now find the result
+            appimage_file=$(find . -maxdepth 1 -name "${BASE_EXECUTABLE_NAME}-*.AppImage" -print -quit)
+            if [[ -n "$appimage_file" ]]; then
+                log_info "${GREEN}Build successful. Using built AppImage: $appimage_file${NC}"
+                echo "$appimage_file" # Echo filename to stdout
+                return 0
+            else
+                # Build command succeeded but we couldn't find the output file - this is an error state
+                log_error "Build script finished successfully, but couldn't find the expected output AppImage (${BASE_EXECUTABLE_NAME}-*.AppImage)."
+                # Proceed to download attempt? Or fail here? Let's try download.
+                log_warn "Proceeding to download attempt..."
+            fi
+        else
+            # Build script itself failed (returned non-zero exit code)
+            log_warn "Local build failed (script returned error). Proceeding to download attempt..."
+        fi
+    else
+        log_info "No existing AppImage and no build.sh found. Attempting download..."
+    fi
 
-    # 3. Move and Rename AppImage
-    echo "Installing executable to $FINAL_BIN_PATH ..."
-    mv "$APPIMAGE_FILE" "$FINAL_BIN_PATH"
+    # 3. Download latest release
+    downloaded_filename=$(download_latest_appimage) # This function now only echoes filename to stdout
+    if [[ $? -eq 0 && -n "$downloaded_filename" ]]; then
+        log_info "${GREEN}Using downloaded AppImage: $downloaded_filename${NC}"
+        echo "$downloaded_filename" # Echo filename to stdout
+        return 0
+    fi
+
+    # 4. Failure
+    log_error "Failed to find, build, or download the ChromaDesk AppImage."
+    return 1
+}
+
+# Install the application files (binary, icon, desktop)
+# Takes the path to the source AppImage as argument
+install_files() {
+    local source_appimage="$1"
+
+    log_info "Installing application files..."
+
+    # Ensure source AppImage file actually exists before proceeding
+    if [[ ! -f "$source_appimage" ]]; then
+         log_error "Source AppImage file '$source_appimage' not found!"
+         return 1
+    fi
+
+
+    # Create directories if they don't exist
+    mkdir -p "$INSTALL_DIR_BIN" "$INSTALL_DIR_DESKTOP" "$INSTALL_DIR_ICONS" "$INSTALL_DIR_PIXMAPS"
+
+    # Move and rename AppImage to final binary location
+    log_info "Moving AppImage to $FINAL_BIN_PATH"
+    mv "$source_appimage" "$FINAL_BIN_PATH" || { log_error "Failed to move AppImage."; return 1; }
     chmod +x "$FINAL_BIN_PATH"
 
-    # --- Store installed path in config --- 
-    echo "Storing installation path in configuration..."
-    # Use python to call the config setting function
-    # Ensure venv is active if installer needs it, or use system python if chromadesk is installed
-    PYTHON_CMD="python3" # Default to system python
-    if [[ -f ".venv/bin/python" ]]; then
-         PYTHON_CMD=".venv/bin/python"
-    elif command -v python &> /dev/null; then
-        PYTHON_CMD="python"
-    fi
-    
-    # Try setting config using Python import first
-    if $PYTHON_CMD -c "from chromadesk.core import config; config.set_setting('State', 'installed_appimage_path', '$FINAL_BIN_PATH')" &> /dev/null; then
-         echo "Stored path via Python import: $FINAL_BIN_PATH"
+    # Install Icons
+    if [[ ! -f "$SOURCE_ICON_PATH" ]]; then
+        log_warn "Source icon file not found at $SOURCE_ICON_PATH. Skipping icon installation."
     else
-        echo_yellow "Warning: Could not set config via Python import. Attempting fallback..."
-        # Fallback: Use the installed binary itself
-        if "$FINAL_BIN_PATH" --internal-set-config State installed_appimage_path "$FINAL_BIN_PATH"; then
-            echo "Stored path via installed binary fallback: $FINAL_BIN_PATH"
-        else
-            echo_red "Error: Failed to store installation path using both methods."
-            echo_yellow "       The daily update timer might not work correctly."
-            # Don't exit, installation of binary/desktop files might still be useful
-        fi
-    fi
-    # --------------------------------------
-
-    # 4. Install Icon
-    if [[ ! -f "$ICON_SOURCE_PATH" ]]; then
-        echo_red "Error: Icon file not found at $ICON_SOURCE_PATH. Skipping icon installation."
-    else
-        echo "Installing icon to $FINAL_ICON_PATH ..."
-        cp "$ICON_SOURCE_PATH" "$FINAL_ICON_PATH"
-        # Also copy with simple name for compatibility
-        echo "Installing icon as $INSTALL_DIR_ICONS/chromadesk.png ..."
-        cp "$ICON_SOURCE_PATH" "$INSTALL_DIR_ICONS/chromadesk.png"
-
-        # Also install icon to pixmaps directory for compatibility
-        PIXMAP_DIR="$HOME/.local/share/pixmaps"
-        FINAL_PIXMAP_PATH="$PIXMAP_DIR/$ICON_NAME" # Full RDN name path
-        SIMPLE_PIXMAP_PATH="$PIXMAP_DIR/chromadesk.png" # Simple name path
-        echo "Installing icon to $FINAL_PIXMAP_PATH ..."
-        mkdir -p "$PIXMAP_DIR"
-        cp "$ICON_SOURCE_PATH" "$FINAL_PIXMAP_PATH"
-        # Also copy with simple name for compatibility
-        echo "Installing icon as $SIMPLE_PIXMAP_PATH ..."
-        cp "$ICON_SOURCE_PATH" "$SIMPLE_PIXMAP_PATH"
+        log_info "Installing icons..."
+        cp "$SOURCE_ICON_PATH" "$FINAL_ICON_PATH" || log_warn "Failed to copy icon to $FINAL_ICON_PATH"
+        cp "$SOURCE_ICON_PATH" "$FINAL_SIMPLE_ICON_HICOLOR" || log_warn "Failed to copy icon to $FINAL_SIMPLE_ICON_HICOLOR"
+        cp "$SOURCE_ICON_PATH" "$FINAL_PIXMAP_PATH" || log_warn "Failed to copy icon to $FINAL_PIXMAP_PATH"
+        cp "$SOURCE_ICON_PATH" "$FINAL_SIMPLE_PIXMAP" || log_warn "Failed to copy icon to $FINAL_SIMPLE_PIXMAP"
     fi
 
-    # 5. Create and Install .desktop file
-    echo "Creating desktop file at $FINAL_DESKTOP_PATH ..."
-    # Revert to generating the file, but use simple icon name
-    # Ensure StartupWMClass is included, similar to build script generated file
+    # Create Desktop File
+    log_info "Creating desktop file at $FINAL_DESKTOP_PATH"
     cat > "$FINAL_DESKTOP_PATH" << EOF
 [Desktop Entry]
 Version=1.0
 Name=$APP_NAME
 GenericName=Wallpaper Changer
 Comment=Daily Bing/Custom Wallpaper Changer for GNOME
-Exec=$FINAL_BIN_PATH
-Icon=chromadesk # Use simple name, matching one of the installed icon files
+Exec=$FINAL_BIN_PATH %U
+Icon=$BASE_EXECUTABLE_NAME # Use simple name, points to $FINAL_SIMPLE_ICON_HICOLOR
 Terminal=false
 Type=Application
 Categories=Utility;GTK;GNOME;
 Keywords=wallpaper;background;bing;daily;desktop;image;
 StartupNotify=true
-StartupWMClass=ChromaDesk
+StartupWMClass=$APP_NAME # Should match QApplication name if possible
 EOF
+    chmod 644 "$FINAL_DESKTOP_PATH" # Set standard permissions
 
-    # 6. Update Desktop Database
-    echo "Updating desktop database..."
-    if command -v update-desktop-database &> /dev/null; then
-        update-desktop-database "$INSTALL_DIR_DESKTOP"
-    else
-        echo_yellow "Warning: 'update-desktop-database' command not found. Application menu might not update immediately."
-    fi
-
-    # 7. Update Icon Cache
-    echo "Updating icon cache..."
-    if command -v gtk-update-icon-cache &> /dev/null; then
-        # Ensure the base directory exists before updating
-        if [ -d "$INSTALL_DIR_ICONS_BASE/hicolor" ]; then
-            gtk-update-icon-cache -f -t "$INSTALL_DIR_ICONS_BASE/hicolor"
-        else
-             echo_yellow "Warning: Icon base directory ($INSTALL_DIR_ICONS_BASE/hicolor) not found, skipping icon cache update."
-        fi
-    else
-        echo_yellow "Warning: 'gtk-update-icon-cache' command not found. Icon might not appear immediately."
-    fi
-
-    echo_green "Installation Complete!"
-    echo "You can now run ChromaDesk by typing 'chromadesk' in your terminal"
-    echo "or finding it in your application menu (may require logout/login)."
-    echo_yellow "Note: If 'chromadesk' command is not found, ensure $INSTALL_DIR_BIN is in your PATH."
-    echo "You can usually add it by editing ~/.profile or ~/.bashrc and adding:"
-    echo "  export PATH=\"$HOME/.local/bin:\$PATH\""
-
+    log_info "File installation finished."
+    return 0
 }
 
-# --- Uninstallation Logic ---
-uninstall_app() {
-    echo_yellow "Uninstalling ChromaDesk..."
+# Uninstall application files
+uninstall_files() {
+    log_info "Removing application files..."
+    local removed_count=0
 
-    echo "Checking for installed files..."
-    found_files=0
-
-    # Check for binary
-    if [[ -f "$FINAL_BIN_PATH" ]]; then
-        echo "Found binary: $FINAL_BIN_PATH"
-        ((found_files++))
-    else
-        echo "Binary not found at $FINAL_BIN_PATH."
-    fi
-
-    # Check for desktop file
-    if [[ -f "$FINAL_DESKTOP_PATH" ]]; then
-        echo "Found desktop file: $FINAL_DESKTOP_PATH"
-        ((found_files++))
-    else
-        echo "Desktop file not found at $FINAL_DESKTOP_PATH."
-    fi
-
-    # Check for icon file
-    if [[ -f "$FINAL_ICON_PATH" ]]; then
-        echo "Found icon file: $FINAL_ICON_PATH"
-        ((found_files++))
-    else
-        echo "Icon file not found at $FINAL_ICON_PATH."
-    fi
-
-    if [[ $found_files -eq 0 ]]; then
-        echo_green "ChromaDesk does not appear to be installed in the user local directories. Nothing to do."
-        exit 0
-    fi
-
-    # Confirmation
-    read -p "Are you sure you want to remove these files? (y/N): " confirm
-    if [[ "${confirm,,}" != "y" ]]; then # Convert to lowercase
-        echo "Uninstallation cancelled."
-        exit 0
-    fi
-
-    # Remove files
-    echo "Removing files..."
-    rm -f "$FINAL_BIN_PATH"
-    rm -f "$FINAL_DESKTOP_PATH"
-    rm -f "$FINAL_ICON_PATH"
-    rm -f "$INSTALL_DIR_ICONS/chromadesk.png" # Remove simple hicolor name
-    # Also remove pixmap icon
-    PIXMAP_DIR="$HOME/.local/share/pixmaps"
-    FINAL_PIXMAP_PATH="$PIXMAP_DIR/$ICON_NAME"
-    SIMPLE_PIXMAP_PATH="$PIXMAP_DIR/chromadesk.png" # Simple name path
-    rm -f "$FINAL_PIXMAP_PATH"
-    rm -f "$SIMPLE_PIXMAP_PATH" # Remove simple pixmap name
-
-    # --- Clear installed path in config --- 
-    echo "Clearing installation path in configuration..."
-    PYTHON_CMD="python3"
-    if [[ -f ".venv/bin/python" ]]; then PYTHON_CMD=".venv/bin/python"; 
-    elif command -v python &> /dev/null; then PYTHON_CMD="python"; fi
-    
-    # Try to clear the setting via Python import, ignore errors
-    if $PYTHON_CMD -c "from chromadesk.core import config; config.set_setting('State', 'installed_appimage_path', '')" &> /dev/null; then
-        echo "Cleared path via Python import."
-    else
-        echo_yellow "Warning: Could not clear config via Python import. Attempting fallback..."
-        # Fallback: Use the installed binary (if it still exists) to clear the setting
-        if [[ -f "$FINAL_BIN_PATH" ]]; then
-            if "$FINAL_BIN_PATH" --internal-set-config State installed_appimage_path ""; then
-                echo "Cleared path via installed binary fallback."
+    # Function to remove a file if it exists
+    remove_file() {
+        if [[ -f "$1" ]]; then
+            if rm -f "$1"; then
+                log_info "Removed: $1"
+                ((removed_count++))
             else
-                echo_yellow "Warning: Failed to clear path using installed binary fallback."
+                log_warn "Failed to remove: $1"
             fi
         else
-            # Check for the old name too, just in case, before giving up completely
-            OLD_BIN_PATH="$INSTALL_DIR_BIN/chromadesk"
-            if [[ -f "$OLD_BIN_PATH" ]]; then
-                 if "$OLD_BIN_PATH" --internal-set-config State installed_appimage_path ""; then
-                      echo "Cleared path via OLD installed binary fallback (chromadesk)."
-                 else 
-                      echo_yellow "Warning: Failed to clear path using OLD installed binary fallback."
-                 fi
-            else 
-                echo_yellow "Installed binary ('$BIN_NAME' or 'chromadesk') not found, could not use fallback to clear config."
+            # Log only if expecting the file might exist based on common names
+            if [[ "$1" == "$FINAL_BIN_PATH" || "$1" == "$FINAL_DESKTOP_PATH" ]]; then
+                 log_info "File not found, skipping removal: $1"
             fi
         fi
-    fi
-    # --------------------------------------
+    }
 
-    # Update Desktop Database
-    echo "Updating desktop database..."
-    if command -v update-desktop-database &> /dev/null; then
-        update-desktop-database "$INSTALL_DIR_DESKTOP"
-    else
-        echo_yellow "Warning: 'update-desktop-database' command not found. Application menu might not update immediately."
-    fi
+    remove_file "$FINAL_BIN_PATH"
+    remove_file "$FINAL_DESKTOP_PATH"
+    remove_file "$FINAL_ICON_PATH"
+    remove_file "$FINAL_SIMPLE_ICON_HICOLOR"
+    remove_file "$FINAL_PIXMAP_PATH"
+    remove_file "$FINAL_SIMPLE_PIXMAP"
 
-    # Update Icon Cache (also during uninstall to potentially clean up)
-    echo "Updating icon cache..."
-    if command -v gtk-update-icon-cache &> /dev/null; then
-        if [ -d "$INSTALL_DIR_ICONS_BASE/hicolor" ]; then
-            gtk-update-icon-cache -f -t "$INSTALL_DIR_ICONS_BASE/hicolor"
-        fi
-        # No warning needed if dir doesn't exist during uninstall
-    else
-        echo_yellow "Warning: 'gtk-update-icon-cache' command not found. Icon cache might not be updated."
+    if [[ $removed_count -eq 0 ]]; then
+        log_info "No ChromaDesk files found in standard user locations."
+        return 1 # Indicate nothing was removed
     fi
-
-    echo_green "ChromaDesk uninstallation complete."
-    echo_yellow "Note: Configuration (~/.config/chromadesk) and wallpaper files (~/Pictures/wallpapers) were NOT removed."
-    echo_yellow "      You can remove these manually if desired."
+    return 0
 }
 
-# --- Main Script --- 
-check_deps # Run dependency check first
+# Update desktop caches (database and icons)
+update_desktop_caches() {
+    log_info "Updating desktop caches..."
 
-if [[ "$1" == "--uninstall" ]]; then
-    uninstall_app
-else
-    install_app
-fi
+    if command -v update-desktop-database &>/dev/null; then
+        if [[ -d "$INSTALL_DIR_DESKTOP" ]]; then
+            log_info "Updating desktop database..."
+            update-desktop-database -q "$INSTALL_DIR_DESKTOP" # Use -q for quiet
+        else
+            log_warn "Desktop directory $INSTALL_DIR_DESKTOP not found, skipping database update."
+        fi
+    else
+        log_warn "'update-desktop-database' command not found. Menu might not update immediately."
+    fi
 
-exit 0 
+    if command -v gtk-update-icon-cache &>/dev/null; then
+        # Check standard hicolor directory base
+        local hicolor_base="$INSTALL_DIR_ICONS_BASE/hicolor"
+        if [[ -d "$hicolor_base" ]]; then
+            log_info "Updating icon cache for $hicolor_base..."
+            # Use -f (force) and -t (include subdirs)
+            gtk-update-icon-cache -f -t "$hicolor_base"
+        else
+            log_warn "Icon directory $hicolor_base not found, skipping icon cache update."
+        fi
+    else
+        log_warn "'gtk-update-icon-cache' command not found. Icons might not update automatically."
+    fi
+}
+
+# Manage the installed_appimage_path setting in the config file
+# Arg 1: "set" or "clear"
+# Arg 2: Path to set (only used if arg 1 is "set")
+# Returns 0 on definite success, 1 on potential failure
+manage_config_path() {
+    local action="$1"
+    local path_to_set="${2:-}" # Default to empty if not provided
+    local config_value=""
+    local return_status=1 # Default to failure/uncertainty
+
+    if [[ "$action" == "clear" ]]; then
+        log_info "Attempting to clear installed path in configuration..."
+        config_value=""
+    elif [[ "$action" == "set" ]]; then
+        log_info "Attempting to store installed path in configuration..."
+        config_value="$path_to_set"
+    else
+        log_error "Invalid action '$action' for manage_config_path."
+        return 1
+    fi
+
+    # --- Try using the installed binary first (most reliable method) ---
+    if [[ -x "$FINAL_BIN_PATH" ]]; then
+        log_info "Using installed binary '$FINAL_BIN_PATH' to manage config..."
+        local cmd_output
+        local exit_code
+        # Run command, capture combined output, check exit code afterward
+        cmd_output=$("$FINAL_BIN_PATH" --internal-set-config State installed_appimage_path "$config_value" 2>&1)
+        exit_code=$? # Capture the exit code immediately
+
+        if [[ $exit_code -eq 0 ]]; then
+            log_info "Successfully managed config using installed binary (returned exit code 0)."
+            return_status=0 # Definite success
+        else
+            # Binary returned non-zero, log a warning but don't fail installer
+            log_warn "Installed binary exited with code $exit_code while managing config."
+            log_warn "This might indicate an internal issue in the application, but the setting may have been saved."
+            log_warn "Binary output (stdout/stderr):"
+            # Indent binary output slightly for clarity
+            echo "$cmd_output" | sed 's/^/  /' >&2
+            return_status=1 # Indicate potential failure
+        fi
+    else
+         log_warn "Installed binary '$FINAL_BIN_PATH' not found or not executable. Cannot use it to manage config."
+         return_status=1 # Indicate failure
+    fi
+
+    # --- Final Warning if status is still uncertain/failed ---
+    if [[ "$return_status" -ne 0 ]]; then
+         log_warn "Could not definitively manage the 'installed_appimage_path' configuration setting."
+         log_warn "Automatic updates via the systemd timer might not function correctly."
+    fi
+
+    return $return_status
+}
+
+
+# --- Main Install Function ---
+install_app() {
+    log_info "=== Starting ChromaDesk Installation ==="
+    local appimage_source_path
+
+    # Find, build, or download the AppImage
+    # The function echoes the path on stdout if successful
+    appimage_source_path=$(find_or_create_appimage) || {
+        # find_or_create_appimage already logged the error
+        exit 1
+    }
+
+    # Install the files
+    install_files "$appimage_source_path" || {
+        log_error "File installation step failed."
+        # Attempt to clean up potentially moved file if install failed mid-way
+        # Check if the destination exists before trying to remove
+        [[ -f "$FINAL_BIN_PATH" ]] && rm -f "$FINAL_BIN_PATH"
+        exit 1
+    }
+
+    # Set the configuration path using the installed binary
+    # We log warnings inside manage_config_path but don't exit the installer here
+    manage_config_path "set" "$FINAL_BIN_PATH"
+
+    # Update desktop integration
+    update_desktop_caches
+
+    # Use plain echo for final user instructions (don't go to stderr)
+    echo ""
+    echo -e "${GREEN}=== Installation Complete! ===${NC}"
+    echo ""
+    echo -e "${GREEN}You may now run ChromaDesk from your application menu (may require logout/login).${NC}"
+    echo -e "${YELLOW}If the '${BASE_EXECUTABLE_NAME}' command is not found in your terminal, ensure '$INSTALL_DIR_BIN' is in your PATH environment variable.${NC}"
+    echo -e "${YELLOW}You can typically add it by editing ~/.profile or ~/.bashrc and adding:${NC}"
+    echo -e "${YELLOW}  export PATH=\"\$HOME/.local/bin:\$PATH\"${NC}"
+    echo ""
+}
+
+# --- Main Uninstall Function ---
+uninstall_app() {
+    log_info "=== Starting ChromaDesk Uninstallation ==="
+
+    # Confirm before proceeding
+    read -p "Are you sure you want to uninstall ChromaDesk from user directories? (y/N): " confirm
+    if [[ "${confirm,,}" != "y" ]]; then # Convert to lowercase
+        log_info "Uninstallation cancelled."
+        exit 0
+    fi
+
+    # Remove the files
+    uninstall_files # Logs info if no files found
+
+    # Clear the configuration path
+    manage_config_path "clear" # Log warnings but don't exit
+
+    # Update desktop integration (to remove entries)
+    update_desktop_caches
+
+    # Use plain echo for final user instructions
+    echo ""
+    echo -e "${GREEN}=== Uninstallation Complete ===${NC}"
+    echo -e "${YELLOW}Configuration (~/.config/chromadesk) and wallpaper files (~/Pictures/wallpapers) were NOT removed.${NC}"
+    echo -e "${YELLOW}You can remove these manually if desired.${NC}"
+}
+
+# --- Script Entry Point ---
+main() {
+    check_deps # Run dependency checks first
+
+    # Check for --uninstall flag
+    if [[ "${1:-}" == "--uninstall" ]]; then
+        uninstall_app
+    else
+        # Check if running from source directory (needed for icon/desktop files)
+        if [[ ! -d "data/icons" || ! -f "$SOURCE_ICON_PATH" ]]; then
+             log_error "Installer must be run from the root of the ChromaDesk source directory"
+             log_error "to access necessary data files (like icons)."
+             exit 1
+        fi
+        install_app
+    fi
+    exit 0
+}
+
+# Execute main function
+main "$@"
