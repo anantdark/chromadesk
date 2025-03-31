@@ -243,50 +243,25 @@ def main():
 
     # Handle GUI mode
     elif args.gui:
-        print("DEBUG: Entering GUI mode...")
         logger.info("Starting GUI application")
         try:
-            print("DEBUG: Attempting to import PySide6.QtWidgets...")
             from PySide6.QtWidgets import QApplication
-
-            print("DEBUG: PySide6.QtWidgets imported successfully.")
-            print("DEBUG: Attempting to import chromadesk.ui.main_window...")
             from chromadesk.ui.main_window import MainWindow
-
-            print("DEBUG: chromadesk.ui.main_window imported successfully.")
         except ImportError as e:
-            print(f"FATAL: Failed to import GUI components: {e}")
             logger.critical(f"Failed to import GUI components: {e}")
             return 1
 
         try:
-            logger.info("Initializing QApplication...")
-            print("DEBUG: Initializing QApplication...")
             app = QApplication(sys.argv)
-            print("DEBUG: QApplication initialized.")
-            logger.info("QApplication initialized.")
             app.setApplicationName("ChromaDesk")
             app.setOrganizationName("chromadesk")
 
-            logger.info("Initializing MainWindow...")
-            print("DEBUG: Initializing MainWindow...")
             window = MainWindow()
-            print("DEBUG: MainWindow initialized.")
             logger.info("MainWindow initialized.")
-
-            logger.info("Showing MainWindow...")
-            print("DEBUG: Showing MainWindow...")
             window.show()
-            print("DEBUG: MainWindow shown.")
-            logger.info("MainWindow shown.")
-
-            logger.info("Starting application event loop...")
-            print("DEBUG: Starting application event loop...")
             result = app.exec()
-            print(f"DEBUG: Application event loop finished with result: {result}")
             return result
         except Exception as e:
-            print(f"FATAL: An error occurred during GUI execution: {e}")
             logger.critical(
                 f"An error occurred during GUI execution: {e}", exc_info=True
             )
@@ -294,7 +269,7 @@ def main():
 
 
 if __name__ == "__main__":
-    print("DEBUG: Script starting in __main__...")
+    logger.debug("Script starting in __main__...")
     result = main()
-    print(f"DEBUG: main() finished with exit code: {result}")
+    logger.debug(f"main() finished with exit code: {result}")
     sys.exit(result)

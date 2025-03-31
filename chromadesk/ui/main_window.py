@@ -43,6 +43,7 @@ THUMBNAIL_SIZE = QSize(45, 80)
 
 # Dummy data for regions (Consider moving to config or a constants file later)
 BING_REGIONS = {
+    "India (English)": "en-IN",
     "USA (English)": "en-US",
     "Germany (German)": "de-DE",
     "UK (English)": "en-GB",
@@ -113,7 +114,7 @@ class MainWindow(QMainWindow):
         self.url_input.setPlaceholderText("Enter Image URL (JPG/PNG)")
 
         # History List
-        self.history_label = QLabel("History (Last 7 Days):")
+        self.history_label = QLabel("History")
         self.history_list = QListWidget()
         self.history_list.setIconSize(THUMBNAIL_SIZE)
 
@@ -196,7 +197,7 @@ class MainWindow(QMainWindow):
         palette = self.preview_label.palette()
         palette.setColor(QPalette.ColorRole.Window, Qt.GlobalColor.darkGray)
         self.preview_label.setPalette(palette)
-        self.preview_label.setMinimumSize(400, 300)
+        self.preview_label.setMinimumSize(300, 400)
 
         right_layout.addWidget(self.preview_label)
 
@@ -449,7 +450,7 @@ class MainWindow(QMainWindow):
             )
 
         logger.info(f"Fetching Bing wallpaper for region: {region_code}")
-        self.update_status_message(f"Fetching Bing info for {region_code}...", 0)
+        self.update_status_message(f"Fetching Bing info for {region_code}...", 2000)
         self.preview_label.setText(f"Fetching for {region_code}...")  # Indicate loading
         QApplication.processEvents()  # Allow UI to update
 
@@ -535,21 +536,21 @@ class MainWindow(QMainWindow):
         self._scale_and_display_preview()
 
     # Add this new method to the MainWindow class
-    def update_status_message(self, message: str, timeout: int = 5000):
+    def update_status_message(self, message: str, timeout: int = 5000, color="green"):
         """
         Updates the status bar label with a message and clears it after a timeout.
         A timeout of 0 means the message is persistent until cleared manually or overwritten.
         """
         logger.debug(f"Updating status message: '{message}' (timeout: {timeout})")
-        self.status_label.setText(message)
+        self.status_label.setText(f'<font color="{color}">{message}</font>')
 
         # Clear the message after the timeout, unless timeout is 0
         if timeout > 0:
             QTimer.singleShot(timeout, lambda: self._clear_status_if_matches(message))
 
-    def _clear_status_if_matches(self, message_to_clear: str):
+    def _clear_status_if_matches(self, message_to_clear: str, force_clear=False):
         """Helper slot to clear the status bar only if the message hasn't changed."""
-        if self.status_label.text() == message_to_clear:
+        if self.status_label.text() == message_to_clear or force_clear:
             self.status_label.setText("")
             logger.debug(f"Cleared status message: '{message_to_clear}'")
 
