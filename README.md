@@ -24,24 +24,28 @@ A modern wallpaper management application for 🐧 Linux/GNOME desktop environme
 | ![Bing Today](data/screenshots/app-1.png)            | ![History](data/screenshots/app-2.png)              | ![Custom Sources](data/screenshots/app-3.png)         |
 
 ## Installation 💻
-### Prerequisites  
-
-- FUSE  
-
-FUSE is required for running AppImages and other filesystem-related operations.  
-To install FUSE on Ubuntu (22.04 or later), run the following commands:  
-
-```bash
-sudo add-apt-repository universe
-sudo apt install libfuse2
-```
-For detailed installation instructions, refer to the FUSE [**Installation Guide**](https://github.com/appimage/appimagekit/wiki/fuse).
 
 ### Recommended Method: AppImage 🚀
+### Prerequisites
+
+- FUSE is required for running AppImages and other filesystem-related operations.  
+    To install FUSE on Ubuntu (22.04 or later), run the following commands:
+    ```bash
+    sudo add-apt-repository universe
+    sudo apt install libfuse2
+    ```
+    For detailed installation instructions, refer to the `fuse` [**Installation Guide**](https://github.com/appimage/appimagekit/wiki/fuse).
+- If you don't have `sudo` access or unable to install `fuse` follow below commands to extract the appimage manually and run.
+    ```bash
+    ./chromadesk-*.AppImage --appimage-extract
+    ./squashfs-root/usr/bin/chromadesk
+    ```
+
+### AppImage run with FUSE
 
 The easiest way to get started with ChromaDesk is by using the official AppImage. This is a single file containing the application and all its dependencies, requiring no complex installation.
 
-1.  Download the latest `chromadesk-*.AppImage` from the [**Releases Page**](https://github.com/anantdark/chromadesk/releases)  C
+1.  Download the latest `chromadesk-*.AppImage` from the [**Releases Page**](https://github.com/anantdark/chromadesk/releases).
 2.  Make the AppImage executable:
     ```bash
     chmod +x chromadesk-*.AppImage
