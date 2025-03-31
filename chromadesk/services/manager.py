@@ -1,9 +1,9 @@
 # chromadesk/chromadesk/services/manager.py
-import sys
-import os
 import logging
-import subprocess
+import os
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 # Import config module directly
@@ -170,7 +170,7 @@ def _get_template_dir() -> Path:
             logger.debug(f"Found templates in MEIPASS: {meipass_path}")
             return meipass_path
         else:
-            logger.debug(f"Templates dir not found in MEIPASS at expected location.")
+            logger.debug("Templates dir not found in MEIPASS at expected location.")
 
     # Fallback for development: relative to this file
     dev_path = Path(__file__).parent / "templates"

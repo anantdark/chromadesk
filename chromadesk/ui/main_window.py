@@ -1,18 +1,15 @@
 # chromadesk/chromadesk/ui/main_window.py
+from urllib.parse import urlparse
 import logging  # Import logging
-import sys
 from pathlib import Path
 
-# Add chromadesk import for version
-import chromadesk
-
-from PySide6.QtCore import QSize, Qt, Slot, QTimer, QUrl
-from PySide6.QtGui import QPalette, QPixmap, QIcon, QDesktopServices
+from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Slot
+from PySide6.QtGui import QDesktopServices, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import QCheckBox  # Added QMessageBox
+from PySide6.QtWidgets import QGroupBox  # Added QGroupBox
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -22,12 +19,14 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
-    QVBoxLayout,
-    QWidget,
     QStatusBar,
     QStyle,
-    QGroupBox,  # Added QGroupBox
+    QVBoxLayout,
+    QWidget,
 )
+
+# Add chromadesk import for version
+import chromadesk
 
 # Use .. to go up one level from ui/ to chromadesk/ then into core/
 from ..core import bing as core_bing
@@ -532,7 +531,7 @@ class MainWindow(QMainWindow):
         # Call the base class implementation first
         super().resizeEvent(event)
         # Now, rescale and display the stored preview image
-        logger.debug(f"Window resized, rescaling preview...")
+        logger.debug("Window resized, rescaling preview...")
         self._scale_and_display_preview()
 
     # Add this new method to the MainWindow class
@@ -990,7 +989,3 @@ class MainWindow(QMainWindow):
         # except Exception as e:
         #     logger.error("Failed to get last change status", exc_info=True)
         #     self.last_change_label.setText("Last Change: Error")
-
-
-# --- Need urlparse for custom URL extension guessing ---
-from urllib.parse import urlparse

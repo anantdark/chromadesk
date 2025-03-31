@@ -1,8 +1,9 @@
 # chromadesk/chromadesk/core/bing.py
-import requests
-import logging
 import json
+import logging
 from urllib.parse import urljoin
+
+import requests
 
 # Use the same logger configured in config.py
 logger = logging.getLogger()

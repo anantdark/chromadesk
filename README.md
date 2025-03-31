@@ -218,21 +218,15 @@ python -m unittest discover tests
 python -m unittest tests.test_basics
 ```
 
-## Troubleshooting ❓
+### Format and Lint Project 🐍
+```bash
+pip install isort black flake8 pylint mypy
 
-### Mesa Intel Graphics Warning ⚠️
-
-If you see `MESA-INTEL: warning: Performance support disabled...`, this is usually harmless.
-
-You can:
-
-1.  **Ignore it** 🙂
-2.  **Suppress it temporarily**: `MESA_DEBUG=silent ./chromadesk-*.AppImage`
-3.  **Fix it permanently** (if you have admin rights):
-    ```bash
-    sudo sysctl dev.i915.perf_stream_paranoid=0
-    # And add dev.i915.perf_stream_paranoid=0 to /etc/sysctl.conf
-    ```
+# Run all checks
+isort chromadesk
+black chromadesk
+flake8 --color auto --verbose --count --indent 4 --ignore=E501,F841,W503 --exclude .venv .
+```
 
 ## Requirements 📋
 

@@ -5,8 +5,8 @@ Entry point for running ChromaDesk as a module using 'python -m chromadesk'.
 This script simply imports and calls the main function from the main module.
 """
 
-import sys
 import logging
+import sys
 
 # Basic logging configuration as a fallback, though main.py should handle it primarily.
 log_format = "%(asctime)s - %(levelname)s - %(message)s"

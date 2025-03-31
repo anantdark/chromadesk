@@ -10,12 +10,12 @@ and perform history cleanup. It reads configuration from the standard config fil
 and logs its actions.
 """
 
-import sys
 import logging
+import os  # Needed for environment variables for notify-send
+import subprocess
+import sys
 from datetime import date
 from pathlib import Path
-import subprocess
-import os  # Needed for environment variables for notify-send
 
 # Configure logging (important for debugging scheduled tasks)
 # Log to the same file as the main app, but identify as headless
@@ -46,19 +46,19 @@ logger = logging.getLogger(__name__)
 # Need to handle potential import errors if run standalone vs as module
 try:
     # Use absolute imports (recommended approach)
-    from chromadesk.core import config as core_config
     from chromadesk.core import bing as core_bing
+    from chromadesk.core import config as core_config
     from chromadesk.core import downloader as core_downloader
-    from chromadesk.core import wallpaper as core_wallpaper
     from chromadesk.core import history as core_history
+    from chromadesk.core import wallpaper as core_wallpaper
 except ImportError:
     # Fallback to relative imports if run directly within package
     try:
-        from .core import config as core_config
         from .core import bing as core_bing
+        from .core import config as core_config
         from .core import downloader as core_downloader
-        from .core import wallpaper as core_wallpaper
         from .core import history as core_history
+        from .core import wallpaper as core_wallpaper
 
         logger.info("Using relative imports for core modules.")
     except ImportError as e:
@@ -203,10 +203,10 @@ def run_daily_update():
             bing_info["full_url"], local_path
         )
         if not download_success:
-            logger.error(f"Failed to download Bing image.")
+            logger.error("Failed to download Bing image.")
             send_notification(
                 "ChromaDesk Update Failed",
-                f"Could not download the Bing image.",
+                "Could not download the Bing image.",
                 "normal",
             )
             # Clean up potentially incomplete file? Maybe not necessary if downloader handles it.

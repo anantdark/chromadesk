@@ -1,9 +1,8 @@
 # chromadesk/chromadesk/core/config.py
-from typing import Any
 import configparser
-import os
-from pathlib import Path
 import logging
+from pathlib import Path
+from typing import Any
 
 # Configure basic logging
 logging.basicConfig(

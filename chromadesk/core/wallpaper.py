@@ -4,11 +4,11 @@ Handles setting the desktop wallpaper for GNOME environments and sending
 notifications, adapting to different session types and available settings keys.
 """
 
-import subprocess
 import logging
-from pathlib import Path
-import shutil
 import os
+import shutil
+import subprocess
+from pathlib import Path
 
 # Attempt imports for notification libraries - handle if missing
 try:
@@ -368,13 +368,13 @@ def set_gnome_wallpaper(image_path: Path) -> bool:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, check=True, timeout=10
             )
-            logger.debug(f"Command successful.")  # Keep success log concise
+            logger.debug("Command successful.")  # Keep success log concise
             logger.debug(f"Running command: {' '.join(cmd)}")
             # Run the command, check for non-zero exit code, capture output
             result = subprocess.run(
                 cmd, capture_output=True, text=True, check=True, timeout=10
             )
-            logger.debug(f"Command successful.")  # Keep success log concise
+            logger.debug("Command successful.")  # Keep success log concise
         except FileNotFoundError:
             logger.error(f"Command failed: '{cmd[0]}' not found. Check PATH.")
             logger.error(f"Command failed: '{cmd[0]}' not found. Check PATH.")

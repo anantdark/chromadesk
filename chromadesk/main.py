@@ -1,21 +1,10 @@
-print("DEBUG: main.py top-level execution starting...")
-#!/usr/bin/env python3
-# chromadesk/main.py
-"""
-ChromaDesk - Daily Bing/Custom Wallpaper Changer for GNOME
-
-This is the main entry point for the ChromaDesk application.
-It handles both GUI and command-line modes.
-"""
-
-import sys
 import argparse
 import logging
 import os
+import sys
+from importlib.metadata import \
+    version as get_version  # Import earlier for version/internal commands
 from pathlib import Path
-from importlib.metadata import (
-    version as get_version,
-)  # Import earlier for version/internal commands
 
 # Import core config early for internal command use
 from chromadesk.core import config as core_config
@@ -128,11 +117,12 @@ def main():
         # Import necessary core functions for headless operation
         try:
             # config already imported
+            from datetime import date
+
             from chromadesk.core import bing as core_bing
             from chromadesk.core import downloader as core_downloader
             from chromadesk.core import history as core_history
             from chromadesk.core import wallpaper as core_wallpaper
-            from datetime import date
         except ImportError as e:
             logger.critical(f"Failed to import core components for headless mode: {e}")
             return 1

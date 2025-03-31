@@ -1,9 +1,10 @@
 # chromadesk/chromadesk/core/downloader.py
-import requests
+import io
 import logging
 from pathlib import Path
+
+import requests
 from PIL import Image  # Using Pillow for validation
-import io
 
 logger = logging.getLogger()
 
@@ -93,11 +94,10 @@ if __name__ == "__main__":
     print("Testing Image Downloader...")
     # Ensure Pillow is installed: pip install Pillow
 
-    from .history import (
-        get_wallpaper_dir,
-        ensure_wallpaper_dir,
-    )  # Import history functions
     from datetime import date
+
+    from .history import (ensure_wallpaper_dir,  # Import history functions
+                          get_wallpaper_dir)
 
     # --- TEMPORARY MODIFICATION FOR TESTING HISTORY ---
     # Ensure the actual wallpaper directory exists
