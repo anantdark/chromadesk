@@ -96,8 +96,8 @@ if __name__ == "__main__":
         print("Failed to fetch info for en-US.")
 
     # Test another region
-    print("\n--- Testing Another Region (en-IN) ---")
-    info_de = fetch_bing_wallpaper_info(region="en-IN")
+    print("\n--- Testing Another Region (de-DE) ---")
+    info_de = fetch_bing_wallpaper_info(region="de-DE")
     if info_de:
         print(f"Date: {info_de['date']}")
         print(f"Title: {info_de['title']}")

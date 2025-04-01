@@ -18,7 +18,7 @@ CONFIG_FILE = CONFIG_DIR / "config.ini"
 DEFAULT_SETTINGS = {
     "Settings": {
         "enabled": "false",  # Automatic daily updates disabled by default
-        "region": "en-IN",  # Default Bing market region
+        "region": "en-US",  # Default Bing market region
         "keep_history": "7",  # Number of Bing wallpapers to keep
         "wallpaper_dir": str(
             Path.home() / "Pictures" / "wallpapers"
