@@ -1,6 +1,6 @@
 # .github/workflows/release.yml
 
-name: Build and Release AppImage (Multi-OS LTS)
+name: Build and Release AppImage (Multi-OS LTS + Fedora)
 
 # --- Tells GitHub Actions WHEN to run this workflow ---
 on:
@@ -13,15 +13,17 @@ on:
 
 # Permissions needed for the workflow to interact with the repo
 permissions:
-  contents: write # Required by softprops/action-gh-release to create releases and upload assets
+  contents: write       # Required by gh release create/upload/edit
+  pull-requests: write  # Required by gh pr comment
 
 jobs:
-  # == JOB 1: Build the AppImage on multiple Ubuntu LTS versions ==
+  # == JOB 1: Build the AppImage on multiple OS versions ==
   build:
     strategy:
       # Define the OS versions to run the build job on
       matrix:
-        os: [ubuntu-20.04, ubuntu-24.04] # Legacy (20.04) and Modern (24.04) LTS
+        # Ubuntu LTS + Latest Fedora
+        os: [ubuntu-20.04, ubuntu-22.04, ubuntu-24.04, fedora-latest]
       # Don't cancel all builds if one OS in the matrix fails
       fail-fast: false
     # Dynamic job name based on the OS from the matrix
@@ -33,6 +35,9 @@ jobs:
       # Step 1.1: Get the source code
       - name: Checkout code
         uses: actions/checkout@v4
+        # Fetch all history and tags for changelog generation later
+        with:
+          fetch-depth: 0
 
       # Step 1.2: Set up the Python environment
       - name: Set up Python
@@ -43,17 +48,41 @@ jobs:
       # Step 1.3: Install OS-level packages needed for the build
       - name: Install System Build Dependencies
         run: |
-          sudo apt-get update
-          # Install necessary tools and libraries.
-          # libglib2.0-dev is crucial for building dbus-python, a dependency for notifications.
-          sudo apt-get install -y --no-install-recommends \
-            patchelf \
-            desktop-file-utils \
-            libfuse2 \
-            fakeroot \
-            libdbus-1-dev \
-            pkg-config \
-            libglib2.0-dev   # <-- Ensures dbus-python builds correctly
+          if [[ "${{ matrix.os }}" == "fedora-latest" ]]; then
+            echo "Installing dependencies for Fedora..."
+            # Install necessary tools and libraries using dnf
+            # dbus-devel provides dbus headers, glib2-devel provides glib headers
+            # pkgconf-pkg-config provides pkg-config
+            # fuse-libs provides libfuse.so.2 needed by some AppImages/tools
+            # gcc, make, python3-devel are needed for building C extensions (like dbus-python)
+            sudo dnf install -y \
+              patchelf \
+              desktop-file-utils \
+              fuse-libs \
+              fakeroot \
+              dbus-devel \
+              pkgconf-pkg-config \
+              glib2-devel \
+              gcc \
+              make \
+              python3-devel
+          elif [[ "${{ matrix.os }}" == ubuntu-* ]]; then
+            echo "Installing dependencies for Ubuntu (${{ matrix.os }})..."
+            sudo apt-get update
+            # Install necessary tools and libraries using apt
+            # libglib2.0-dev is crucial for building dbus-python
+            sudo apt-get install -y --no-install-recommends \
+              patchelf \
+              desktop-file-utils \
+              libfuse2 \
+              fakeroot \
+              libdbus-1-dev \
+              pkg-config \
+              libglib2.0-dev
+          else
+             echo "ERROR: Unknown OS ${{ matrix.os }}"
+             exit 1
+          fi
           echo "System dependencies installed on ${{ matrix.os }}"
 
       # Step 1.4: Get the appimagetool utility
@@ -63,8 +92,17 @@ jobs:
           echo "Downloading appimagetool from ${APPIMAGETOOL_URL}..."
           wget -q "${APPIMAGETOOL_URL}" -O appimagetool.AppImage
           chmod +x appimagetool.AppImage
-          sudo mv appimagetool.AppImage /usr/local/bin/appimagetool
-          echo "appimagetool installed to /usr/local/bin/appimagetool"
+          # Use sudo on Linux runners
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+             sudo mv appimagetool.AppImage /usr/local/bin/appimagetool
+             echo "appimagetool installed to /usr/local/bin/appimagetool"
+          else
+             # Handle other OS if needed, though matrix is Linux only now
+             mv appimagetool.AppImage ./appimagetool
+             echo "::add-path::$(pwd)" # Add current dir to PATH for this job
+             echo "appimagetool added to PATH for non-Linux runner"
+          fi
+
 
       # Step 1.5: Extract the project version from pyproject.toml
       - name: Get Project Version
@@ -97,18 +135,15 @@ jobs:
       - name: Install Python Build Dependencies & Project
         run: |
           python -m pip install --upgrade pip
-          # Install tools needed to build the package itself
           pip install build setuptools wheel
-          # Ensure the specific version of PySide6 is installed first
           echo "Installing/Upgrading PySide6 (pinned)..."
           pip install --upgrade "PySide6==6.8.3" # Use consistent latest stable PySide
           pip show PySide6 # Log installed version for verification
-          # Install the project itself along with its core dependencies from pyproject.toml
           echo "Installing project dependencies..."
           pip install .
-          # Install optional dependencies defined in pyproject.toml [project.optional-dependencies]
           echo "Installing optional dependencies [notifications]..."
-          pip install ".[notifications]" # This needs libglib2.0-dev from previous step
+          # Ensure dbus-python builds correctly, headers installed in step 1.3
+          pip install ".[notifications]"
 
       # Step 1.7: Run the main build script to create the AppDir and initial AppImage
       - name: Build AppImage using build.sh
@@ -122,31 +157,24 @@ jobs:
       - name: Determine and Prepare AppImage Filename for Upload
         id: prepare_appimage
         run: |
-          # Get version from the previous step's output
           VERSION="${{ steps.get_project_version.outputs.project_version }}"
           if [ -z "$VERSION" ]; then echo "ERROR: Project version is empty. Cannot determine filename."; exit 1; fi
 
-          # Create an OS tag like 'ubuntu2004' or 'ubuntu2404' from the matrix variable
-          OS_TAG=$(echo "${{ matrix.os }}" | sed -e 's/ubuntu-//' -e 's/\.//g')
+          # Create an OS tag like 'ubuntu2004', 'ubuntu2204', 'ubuntu2404', 'fedoralatest'
+          # Remove '-' and '.' characters from the matrix OS variable
+          OS_TAG=$(echo "${{ matrix.os }}" | sed -e 's/-//g' -e 's/\.//g')
 
-          # Define original and new filenames
           ORIGINAL_FILENAME="chromadesk-${VERSION}-x86_64.AppImage"
           NEW_FILENAME="chromadesk-${VERSION}-x86_64-${OS_TAG}.AppImage"
 
-          # Check if the build script actually produced the expected file
           echo "Checking for original file: ${ORIGINAL_FILENAME}"
           if [[ ! -f "${ORIGINAL_FILENAME}" ]]; then
             echo "ERROR: Expected AppImage file ${ORIGINAL_FILENAME} not found after build!"
-            echo "Listing directory contents:"
             ls -lAh . ; echo "Listing *.AppImage files:" ; ls -l *.AppImage
             exit 1
           fi
-
-          # Rename the file
           echo "Renaming ${ORIGINAL_FILENAME} to ${NEW_FILENAME}"
           mv "${ORIGINAL_FILENAME}" "${NEW_FILENAME}"
-
-          # Set the new filename as output for the upload step
           echo "filename=${NEW_FILENAME}" >> $GITHUB_OUTPUT
           echo "AppImage prepared for upload: ${NEW_FILENAME}"
 
@@ -155,66 +183,116 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           # Unique name for the artifact based on the OS build
-          name: chromadesk-appimage-${{ matrix.os }}
+          name: chromadesk-appimage-${{ matrix.os }} # e.g., chromadesk-appimage-fedora-latest
           # Path to the file to upload (using output from previous step)
-          path: ${{ steps.prepare_appimage.outputs.filename }}
+          path: ${{ steps.prepare_appimage.outputs.filename }} # e.g., chromadesk-X.Y.Z-x86_64-fedoralatest.AppImage
           # How long to keep the artifact (short retention is fine as it's used by the release job)
           retention-days: 1
 
-  # == JOB 2: Create the GitHub Release ==
+  # == JOB 2: Create the GitHub Release and Comment on PR ==
   release:
-    # User-friendly name for the job
-    name: Create GitHub Release
-    # This job depends on the successful completion of ALL matrix builds in the 'build' job
+    name: Create GitHub Release and Comment
     needs: build
-    # Use a standard, lightweight runner for this job
     runs-on: ubuntu-latest
+    # Only run this job if triggered by a tag push
+    if: startsWith(github.ref, 'refs/tags/')
 
     steps:
       # Step 2.1: Download all artifacts produced by the 'build' job matrix runs
       - name: Download all AppImage artifacts
         uses: actions/download-artifact@v4
         with:
-          # If 'name' is not specified, it downloads all artifacts from the workflow run.
-          # They will be placed in the specified 'path' directory,
-          # usually preserving the artifact name as a subdirectory structure.
-          path: appimages
+          path: appimages # Download all artifacts into the 'appimages' directory
 
-      # Step 2.2: Verify downloaded files (optional but helpful for debugging)
+      # Step 2.2: List downloaded artifacts (for debugging)
       - name: List downloaded artifacts
         run: |
           echo "Downloaded artifacts structure:"
           ls -lR appimages/
-          # Example expected structure:
-          # appimages/
-          # ├── chromadesk-appimage-ubuntu-20.04/
-          # │   └── chromadesk-X.Y.Z-x86_64-ubuntu2004.AppImage
-          # └── chromadesk-appimage-ubuntu-24.04/
-          #     └── chromadesk-X.Y.Z-x86_64-ubuntu2404.AppImage
+          # Move files out of subdirectories for easier handling with gh release create
+          find appimages -type f -name '*.AppImage' -exec mv {} appimages/ \;
+          echo "Files after moving:"
+          ls -l appimages/
 
-      # Step 2.3: Create the release and upload the downloaded AppImages
-      - name: Create GitHub Release and Upload Assets
-        uses: softprops/action-gh-release@v2
-        with:
-          # Use a glob pattern to find all .AppImage files within the download directory structure
-          files: appimages/*/*.AppImage
-          # Use the tag that triggered this workflow run
-          tag_name: ${{ github.ref_name }}
-          # Title for the GitHub Release page
-          name: Release ${{ github.ref_name }} (Multi-Build LTS)
-          # Body/description for the release, explaining the different files
-          body: |
-            Automated AppImage release for ChromaDesk ${{ github.ref_name }}.
+      # Step 2.3: Define the custom notes footer
+      # Using an intermediate file avoids issues with multiline strings in env vars across steps
+      - name: Define Custom Release Notes Footer
+        id: custom_notes
+        run: |
+          cat << 'EOF' > custom_notes_footer.md
+          ---
 
-            This release includes builds for different compatibility targets based on Ubuntu LTS versions:
+          **AppImage Build Details:**
 
-            *   **`...-ubuntu2004.AppImage`**: Built on Ubuntu 20.04 (GLIBC 2.31). Recommended for **older systems** (e.g., Ubuntu 20.04, Debian 11, RHEL 8 derivatives).
-            *   **`...-ubuntu2404.AppImage`**: Built on Ubuntu 24.04 (GLIBC 2.39). Recommended for **very recent systems** (e.g., Ubuntu 24.04+, Fedora 40+, Debian 13+/testing). Should provide the best experience on modern desktops.
+          This release includes builds for different compatibility targets:
 
-            Please download the version appropriate for your Linux distribution.
-          # Set draft/prerelease status as needed
-          draft: false
-          prerelease: false
+          *   **`...-ubuntu2004.AppImage`**: Built on Ubuntu 20.04 (GLIBC 2.31). Recommended for **older systems** (e.g., Ubuntu 20.04, Debian 11, RHEL 8 derivatives).
+          *   **`...-ubuntu2204.AppImage`**: Built on Ubuntu 22.04 (GLIBC 2.35). Recommended for **intermediate systems** (e.g., Ubuntu 22.04, Debian 12, RHEL 9 derivatives, Fedora 37/38).
+          *   **`...-ubuntu2404.AppImage`**: Built on Ubuntu 24.04 (GLIBC 2.39). Recommended for **very recent systems** (e.g., Ubuntu 24.04+, Fedora 40+, Debian 13+/testing).
+          *   **`...-fedoralatest.AppImage`**: Built on Fedora (latest). Recommended for **Fedora users and potentially other very recent distributions** using similar library versions (libc, C++, etc.) as current Fedora.
+
+          Please download the version appropriate for your Linux distribution. Using the build matching your base system (or an older one) generally provides the best compatibility.
+          EOF
+          echo "Custom notes footer written to custom_notes_footer.md"
+
+      # Step 2.4: Create GitHub Release using GitHub CLI
+      - name: Create GitHub Release
+        id: create_release
         env:
-          # The action needs the GitHub token to interact with the API
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }} # Get tag name like v1.0.0
+        run: |
+          echo "Creating release for tag ${TAG_NAME}..."
+          # Use gh release create:
+          # - --generate-notes automatically creates changelog from PRs since last tag
+          # - --notes-file appends the content of our custom footer file
+          # - The final arguments are the asset files to upload
+          gh release create "${TAG_NAME}" \
+            --title "Release ${TAG_NAME} (Multi-OS Build)" \
+            --generate-notes \
+            --notes-file custom_notes_footer.md \
+            appimages/*.AppImage
+
+          echo "Release created successfully."
+          # Get the final body of the created release (auto-generated + custom)
+          # Store it in GITHUB_OUTPUT for the next step
+          RELEASE_BODY=$(gh release view "${TAG_NAME}" --json body --jq '.body')
+          echo "release_body<<EOF" >> $GITHUB_OUTPUT
+          echo "$RELEASE_BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "Release body captured."
+
+      # Step 2.5: Find the Pull Request associated with the tag's commit
+      - name: Find Associated Pull Request
+        id: find_pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_SHA: ${{ github.sha }} # SHA of the commit the tag points to
+        run: |
+          echo "Searching for merged PR associated with commit ${COMMIT_SHA}..."
+          # Search for merged PRs where the merge commit SHA matches the tag's commit SHA
+          # Use `// ""` to output an empty string if no PR is found (jq trick)
+          PR_NUMBER=$(gh pr list --state merged --search "${COMMIT_SHA}" --json number --jq '.[0].number // ""')
+
+          if [[ -n "$PR_NUMBER" ]]; then
+            echo "Found associated PR #${PR_NUMBER}"
+            echo "pr_number=${PR_NUMBER}" >> $GITHUB_OUTPUT
+          else
+            echo "No associated merged PR found for commit ${COMMIT_SHA}."
+            echo "pr_number=" >> $GITHUB_OUTPUT # Ensure output is empty
+          fi
+
+      # Step 2.6: Comment on the associated Pull Request (if found)
+      - name: Comment Release Notes on PR
+        # Only run if a PR number was found in the previous step
+        if: steps.find_pr.outputs.pr_number != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.find_pr.outputs.pr_number }}
+          # Use the captured release body from the create_release step output
+          RELEASE_BODY: ${{ steps.create_release.outputs.release_body }}
+        run: |
+          echo "Posting release notes to PR #${PR_NUMBER}..."
+          # Use process substitution to pass the potentially large body via stdin
+          gh pr comment "${PR_NUMBER}" --body-file <(echo "$RELEASE_BODY")
+          echo "Comment posted successfully."
