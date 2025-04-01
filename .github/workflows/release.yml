@@ -1,6 +1,6 @@
 # .github/workflows/release.yml
 
-name: Build and Release AppImage (Multi-OS LTS + Fedora)
+name: Build and Release AppImage (Ubuntu LTS + Fedora)
 
 # --- Tells GitHub Actions WHEN to run this workflow ---
 on:
@@ -22,8 +22,8 @@ jobs:
     strategy:
       # Define the OS versions to run the build job on
       matrix:
-        # Ubuntu LTS + Latest Fedora
-        os: [ubuntu-20.04, ubuntu-22.04, ubuntu-24.04, fedora-latest]
+        # Ubuntu LTS (old & new) + Latest Fedora
+        os: [ubuntu-20.04, ubuntu-24.04, fedora-latest]
       # Don't cancel all builds if one OS in the matrix fails
       fail-fast: false
     # Dynamic job name based on the OS from the matrix
@@ -51,10 +51,6 @@ jobs:
           if [[ "${{ matrix.os }}" == "fedora-latest" ]]; then
             echo "Installing dependencies for Fedora..."
             # Install necessary tools and libraries using dnf
-            # dbus-devel provides dbus headers, glib2-devel provides glib headers
-            # pkgconf-pkg-config provides pkg-config
-            # fuse-libs provides libfuse.so.2 needed by some AppImages/tools
-            # gcc, make, python3-devel are needed for building C extensions (like dbus-python)
             sudo dnf install -y \
               patchelf \
               desktop-file-utils \
@@ -70,7 +66,6 @@ jobs:
             echo "Installing dependencies for Ubuntu (${{ matrix.os }})..."
             sudo apt-get update
             # Install necessary tools and libraries using apt
-            # libglib2.0-dev is crucial for building dbus-python
             sudo apt-get install -y --no-install-recommends \
               patchelf \
               desktop-file-utils \
@@ -160,7 +155,7 @@ jobs:
           VERSION="${{ steps.get_project_version.outputs.project_version }}"
           if [ -z "$VERSION" ]; then echo "ERROR: Project version is empty. Cannot determine filename."; exit 1; fi
 
-          # Create an OS tag like 'ubuntu2004', 'ubuntu2204', 'ubuntu2404', 'fedoralatest'
+          # Create an OS tag like 'ubuntu2004', 'ubuntu2404', 'fedoralatest'
           # Remove '-' and '.' characters from the matrix OS variable
           OS_TAG=$(echo "${{ matrix.os }}" | sed -e 's/-//g' -e 's/\.//g')
 
@@ -227,7 +222,6 @@ jobs:
           This release includes builds for different compatibility targets:
 
           *   **`...-ubuntu2004.AppImage`**: Built on Ubuntu 20.04 (GLIBC 2.31). Recommended for **older systems** (e.g., Ubuntu 20.04, Debian 11, RHEL 8 derivatives).
-          *   **`...-ubuntu2204.AppImage`**: Built on Ubuntu 22.04 (GLIBC 2.35). Recommended for **intermediate systems** (e.g., Ubuntu 22.04, Debian 12, RHEL 9 derivatives, Fedora 37/38).
           *   **`...-ubuntu2404.AppImage`**: Built on Ubuntu 24.04 (GLIBC 2.39). Recommended for **very recent systems** (e.g., Ubuntu 24.04+, Fedora 40+, Debian 13+/testing).
           *   **`...-fedoralatest.AppImage`**: Built on Fedora (latest). Recommended for **Fedora users and potentially other very recent distributions** using similar library versions (libc, C++, etc.) as current Fedora.
 
