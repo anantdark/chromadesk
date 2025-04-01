@@ -1,6 +1,6 @@
 # .github/workflows/release.yml
 
-name: Build and Release AppImage (Ubuntu LTS + Fedora)
+name: Build and Release AppImage (Multi-OS LTS)
 
 # --- Tells GitHub Actions WHEN to run this workflow ---
 on:
@@ -17,13 +17,13 @@ permissions:
   pull-requests: write  # Required by gh pr comment
 
 jobs:
-  # == JOB 1: Build the AppImage on multiple OS versions ==
+  # == JOB 1: Build the AppImage on multiple Ubuntu LTS versions ==
   build:
     strategy:
       # Define the OS versions to run the build job on
       matrix:
-        # Ubuntu LTS (old & new) + Latest Fedora
-        os: [ubuntu-20.04, ubuntu-24.04, fedora-latest]
+        # Ubuntu LTS: Legacy (20.04), Intermediate (22.04), Modern (24.04)
+        os: [ubuntu-20.04, ubuntu-22.04, ubuntu-24.04]
       # Don't cancel all builds if one OS in the matrix fails
       fail-fast: false
     # Dynamic job name based on the OS from the matrix
@@ -48,36 +48,18 @@ jobs:
       # Step 1.3: Install OS-level packages needed for the build
       - name: Install System Build Dependencies
         run: |
-          if [[ "${{ matrix.os }}" == "fedora-latest" ]]; then
-            echo "Installing dependencies for Fedora..."
-            # Install necessary tools and libraries using dnf
-            sudo dnf install -y \
-              patchelf \
-              desktop-file-utils \
-              fuse-libs \
-              fakeroot \
-              dbus-devel \
-              pkgconf-pkg-config \
-              glib2-devel \
-              gcc \
-              make \
-              python3-devel
-          elif [[ "${{ matrix.os }}" == ubuntu-* ]]; then
-            echo "Installing dependencies for Ubuntu (${{ matrix.os }})..."
-            sudo apt-get update
-            # Install necessary tools and libraries using apt
-            sudo apt-get install -y --no-install-recommends \
-              patchelf \
-              desktop-file-utils \
-              libfuse2 \
-              fakeroot \
-              libdbus-1-dev \
-              pkg-config \
-              libglib2.0-dev
-          else
-             echo "ERROR: Unknown OS ${{ matrix.os }}"
-             exit 1
-          fi
+          echo "Installing dependencies for Ubuntu (${{ matrix.os }})..."
+          sudo apt-get update
+          # Install necessary tools and libraries using apt
+          # libglib2.0-dev is crucial for building dbus-python
+          sudo apt-get install -y --no-install-recommends \
+            patchelf \
+            desktop-file-utils \
+            libfuse2 \
+            fakeroot \
+            libdbus-1-dev \
+            pkg-config \
+            libglib2.0-dev
           echo "System dependencies installed on ${{ matrix.os }}"
 
       # Step 1.4: Get the appimagetool utility
@@ -87,17 +69,8 @@ jobs:
           echo "Downloading appimagetool from ${APPIMAGETOOL_URL}..."
           wget -q "${APPIMAGETOOL_URL}" -O appimagetool.AppImage
           chmod +x appimagetool.AppImage
-          # Use sudo on Linux runners
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-             sudo mv appimagetool.AppImage /usr/local/bin/appimagetool
-             echo "appimagetool installed to /usr/local/bin/appimagetool"
-          else
-             # Handle other OS if needed, though matrix is Linux only now
-             mv appimagetool.AppImage ./appimagetool
-             echo "::add-path::$(pwd)" # Add current dir to PATH for this job
-             echo "appimagetool added to PATH for non-Linux runner"
-          fi
-
+          sudo mv appimagetool.AppImage /usr/local/bin/appimagetool
+          echo "appimagetool installed to /usr/local/bin/appimagetool"
 
       # Step 1.5: Extract the project version from pyproject.toml
       - name: Get Project Version
@@ -155,7 +128,7 @@ jobs:
           VERSION="${{ steps.get_project_version.outputs.project_version }}"
           if [ -z "$VERSION" ]; then echo "ERROR: Project version is empty. Cannot determine filename."; exit 1; fi
 
-          # Create an OS tag like 'ubuntu2004', 'ubuntu2404', 'fedoralatest'
+          # Create an OS tag like 'ubuntu2004', 'ubuntu2204', 'ubuntu2404'
           # Remove '-' and '.' characters from the matrix OS variable
           OS_TAG=$(echo "${{ matrix.os }}" | sed -e 's/-//g' -e 's/\.//g')
 
@@ -178,9 +151,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           # Unique name for the artifact based on the OS build
-          name: chromadesk-appimage-${{ matrix.os }} # e.g., chromadesk-appimage-fedora-latest
+          name: chromadesk-appimage-${{ matrix.os }} # e.g., chromadesk-appimage-ubuntu-22.04
           # Path to the file to upload (using output from previous step)
-          path: ${{ steps.prepare_appimage.outputs.filename }} # e.g., chromadesk-X.Y.Z-x86_64-fedoralatest.AppImage
+          path: ${{ steps.prepare_appimage.outputs.filename }} # e.g., chromadesk-X.Y.Z-x86_64-ubuntu2204.AppImage
           # How long to keep the artifact (short retention is fine as it's used by the release job)
           retention-days: 1
 
@@ -219,11 +192,11 @@ jobs:
 
           **AppImage Build Details:**
 
-          This release includes builds for different compatibility targets:
+          This release includes builds for different compatibility targets based on Ubuntu LTS versions:
 
           *   **`...-ubuntu2004.AppImage`**: Built on Ubuntu 20.04 (GLIBC 2.31). Recommended for **older systems** (e.g., Ubuntu 20.04, Debian 11, RHEL 8 derivatives).
+          *   **`...-ubuntu2204.AppImage`**: Built on Ubuntu 22.04 (GLIBC 2.35). Recommended for **intermediate systems** (e.g., Ubuntu 22.04, Debian 12, RHEL 9 derivatives, Fedora 37/38).
           *   **`...-ubuntu2404.AppImage`**: Built on Ubuntu 24.04 (GLIBC 2.39). Recommended for **very recent systems** (e.g., Ubuntu 24.04+, Fedora 40+, Debian 13+/testing).
-          *   **`...-fedoralatest.AppImage`**: Built on Fedora (latest). Recommended for **Fedora users and potentially other very recent distributions** using similar library versions (libc, C++, etc.) as current Fedora.
 
           Please download the version appropriate for your Linux distribution. Using the build matching your base system (or an older one) generally provides the best compatibility.
           EOF
@@ -242,7 +215,7 @@ jobs:
           # - --notes-file appends the content of our custom footer file
           # - The final arguments are the asset files to upload
           gh release create "${TAG_NAME}" \
-            --title "Release ${TAG_NAME} (Multi-OS Build)" \
+            --title "Release ${TAG_NAME} (Multi-Build LTS)" \
             --generate-notes \
             --notes-file custom_notes_footer.md \
             appimages/*.AppImage
