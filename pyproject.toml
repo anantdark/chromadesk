@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chromadesk"
-version = "0.3.0" # Updated version
+version = "0.3.1" # Updated version
 authors = [
   { name="Anant Patel", email="anantpatel2000@pm.me" }, 
 ]
