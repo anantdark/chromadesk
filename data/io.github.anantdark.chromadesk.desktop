@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=ChromaDesk
+GenericName=Wallpaper Changer
+Comment=Daily Bing/Custom Wallpaper Changer for GNOME
+Exec=chromadesk
+Icon=io.github.anantdark.chromadesk
+Terminal=false
+Type=Application
+Categories=Utility;GTK;GNOME;
+Keywords=wallpaper;background;bing;daily;desktop;image;
+StartupNotify=true
+StartupWMClass=ChromaDesk 
