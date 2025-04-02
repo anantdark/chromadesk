@@ -1,24 +1,32 @@
+# This is the name of the workflow
 name: PR Audit
 
+# It will run whenever a Pull Request is opened
 on: [pull_request]
 
+# This defines the set of steps to run
 jobs: 
   lint:
+    # Use a VM running Ubuntu
     runs-on: ubuntu-latest
 
-    steps: 
+    # All the steps to do the job
+    
+    steps:
+      # Step1: Download the code from pull request 
       - name: Check code
         uses: actions/checkout@v4
- 
+      # Step2: Set up Python(v3.11) in VM 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
+      # Step3: Install the necessary tools to check the code
       - name: Install tools
         run: |
           pip install flake8 black isort reviewdog
 
+      # Step4: Linting with flake8 and commenting with reviewdog
       - name: Run flake8 for linting
         uses: reviewdog/action-flake8@v3
         with: 
@@ -27,10 +35,10 @@ jobs:
           level: warning
           fail_on_error: true
           filter_mode: diff_context
-
+      # Step5: Check if the code is formatted using black
       - name: Run Black
         run: black . --check
-
+      #Step6: Check if imports are sorted correctly using isort
       - name: Run isort
         run: isort . --check-only
 
